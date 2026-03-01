@@ -56,8 +56,8 @@ def run_scraper():
 
             print(f"Found {len(cruises)} cruises on Page 1. Preparing for Database insertion...")
             
-            # 3. Clean out old data (Optional: Delete all existing cruises so you only have fresh prices)
-            # supabase.table('OTB_Cruises').delete().neq('id', 0).execute()
+            # 3. Clean out old data (Updated to 'OTB Cruises')
+            # supabase.table('OTB Cruises').delete().neq('id', 0).execute()
 
             # 4. Loop through and Insert
             for cruise in cruises:
@@ -72,8 +72,8 @@ def run_scraper():
                     "price": str(cruise.get('price', ''))
                 }
                 
-                # Push to Supabase
-                supabase.table('OTB_Cruises').insert(insert_data).execute()
+                # Push to Supabase (UPDATED TO 'OTB Cruises' with a space)
+                supabase.table('OTB Cruises').insert(insert_data).execute()
                 
             print("Successfully updated Supabase Database!")
 
