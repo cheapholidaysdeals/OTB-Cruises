@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import json
 from supabase import create_client, Client
@@ -16,80 +17,101 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # 2. OTB API Setup
 API_URL = 'https://www.onthebeach.co.uk/holidays/cruise/search/api/'
 
-# We use the exact headers you pulled to mimic your browser
 HEADERS = {
     'accept': 'application/json, text/javascript, */*; q=0.01',
     'accept-language': 'en-US,en;q=0.9,en-GB;q=0.8',
     'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
     'origin': 'https://www.onthebeach.co.uk',
-    'referer': 'https://www.onthebeach.co.uk/holidays/cruise/search/search/?traveltype=Cruise+Only&region=Caribbean,Europe',
+    'referer': 'https://www.onthebeach.co.uk/holidays/cruise/search/search/?traveltype=Cruise+Only',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0',
     'x-requested-with': 'XMLHttpRequest',
     'cookie': 'datadome=2_HUpNxC0aFRlZbw7lgs8trJ7wvjP1cJaqZLGnch0R8EaoJ5ONt7GDgnH95URI6Xf4oOIdXHFJhMOYHhvQL69hu7rGCAjGg65sPEqTBklCE0TSDWiSEQs5CLGofSEAqa;'
 }
 
-# The exact payload requesting Page 1 of Europe & Caribbean cruises
-PAYLOAD = 'action=search%2Fresults&filters=cruiselines%2Cships%2Cregions%2Cdepartports%2Cvisitports%2Cdurations%2Ctraveltypes%2Cprices&page=1&sort=date&order=asc&startdate=&enddate=&region=Caribbean%2CEurope&cruiseline=&ship=&departport=&visitport=&duration=&price=1%2C102468&cruises=&traveltype=Cruise+Only'
-
 def run_scraper():
-    print("Starting OTB Cruise Crawl...")
+    print("Starting Global OTB Cruise Crawl...")
     
-    try:
-        response = requests.post(API_URL, headers=HEADERS, data=PAYLOAD, timeout=15)
+    # Optional: Wipe the table clean before a fresh daily scrape
+    # supabase.table('OTB Cruises').delete().neq('cruise_line', 'DO_NOT_DELETE').execute()
+    
+    page = 1
+    total_inserted = 0
+    
+    # 3. Pagination Loop
+    while True:
+        print(f"Fetching Page {page}...")
         
-        if response.status_code == 403:
-            print("HTTP 403: Blocked by Datadome/Cloudflare. We will need to route via a Scraper Proxy.")
-            return
-
-        if response.status_code == 200:
-            data = response.json()
-            cruises = data.get('results', []) 
+        # The payload dynamically changes the 'page=' number
+        PAYLOAD = f"action=search%2Fresults&filters=cruiselines%2Cships%2Cregions%2Cdepartports%2Cvisitports%2Cdurations%2Ctraveltypes%2Cprices&page={page}&sort=date&order=asc&startdate=&enddate=&region=&cruiseline=&ship=&departport=&visitport=&duration=&price=1%2C102468&cruises=&traveltype=Cruise+Only"
+        
+        try:
+            response = requests.post(API_URL, headers=HEADERS, data=PAYLOAD, timeout=15)
             
-            if not cruises:
-                print("No cruises found.")
-                return
+            if response.status_code == 403:
+                print("HTTP 403: Blocked by Datadome/Cloudflare. We reached our limit.")
+                break
 
-            print(f"Found {len(cruises)} cruises on Page 1. Preparing for Database insertion...")
-            
-            # Optional: Uncomment the line below to wipe the old database records clean before inserting the new daily ones!
-            # supabase.table('OTB Cruises').delete().neq('cruise_line', 'DO_NOT_DELETE').execute()
-
-            # 4. Loop through and Insert using the exact mapped JSON keys
-            for item in cruises:
+            if response.status_code == 200:
+                data = response.json()
+                cruises = data.get('results', []) 
                 
-                # Extract the nested dictionaries safely
-                c_data = item.get('cruise', {})
-                cl_data = item.get('cruiseline', {})
-                s_data = item.get('ship', {})
-                p_data = item.get('prices_pp', {})
+                if not cruises:
+                    print(f"No more cruises found. Finished on page {page - 1}.")
+                    break
+
+                print(f"Found {len(cruises)} cruises on Page {page}. Inserting into database...")
                 
-                # Format the itinerary array into a nice readable string separated by hyphens
-                itinerary_raw = c_data.get('itinerary', [])
-                itinerary_string = " - ".join(itinerary_raw) if isinstance(itinerary_raw, list) else str(itinerary_raw)
+                for item in cruises:
+                    c_data = item.get('cruise', {})
+                    cl_data = item.get('cruiseline', {})
+                    s_data = item.get('ship', {})
+                    p_data = item.get('prices_pp', {})
+                    
+                    itinerary_raw = c_data.get('itinerary', [])
+                    itinerary_string = " - ".join(itinerary_raw) if isinstance(itinerary_raw, list) else str(itinerary_raw)
+                    price_val = p_data.get('cheapest', '0')
+                    cruise_link = c_data.get('link', '')
+                    
+                    # Grab the main ship image
+                    ship_image_dict = s_data.get('image', {})
+                    image_link = ship_image_dict.get('file', '') if isinstance(ship_image_dict, dict) else ''
 
-                # Format the price safely
-                price_val = p_data.get('cheapest', '0')
+                    # Grab the Cruise Line Logo
+                    cl_image_dict = cl_data.get('image', {})
+                    cl_logo_link = cl_image_dict.get('file', '') if isinstance(cl_image_dict, dict) else ''
 
-                insert_data = {
-                    "cruise_line": str(cl_data.get('name', 'Unknown')),
-                    "ship_name": str(s_data.get('name', 'Unknown')),
-                    "depart_port": str(c_data.get('depart_port', 'Unknown')),
-                    "itinerary": itinerary_string,
-                    "depart_date": str(c_data.get('depart_date', '')),
-                    "duration": str(c_data.get('duration', '')),
-                    "price": str(price_val)
-                }
+                    insert_data = {
+                        "cruise_line": str(cl_data.get('name', 'Unknown')),
+                        "ship_name": str(s_data.get('name', 'Unknown')),
+                        "depart_port": str(c_data.get('depart_port', 'Unknown')),
+                        "itinerary": itinerary_string,
+                        "depart_date": str(c_data.get('depart_date', '')),
+                        "duration": str(c_data.get('duration', '')),
+                        "price": str(price_val),
+                        "url": str(cruise_link),
+                        "image_url": str(image_link),
+                        "cruise_line_logo": str(cl_logo_link) # --- NEW: Insert Logo into Supabase ---
+                    }
+                    
+                    supabase.table('OTB Cruises').insert(insert_data).execute()
+                    total_inserted += 1
                 
-                # Push to Supabase
-                supabase.table('OTB Cruises').insert(insert_data).execute()
+                # Move to the next page
+                page += 1
                 
-            print("Successfully updated Supabase Database!")
+                # Sleep for 2 seconds to avoid anti-bot triggers
+                time.sleep(2)
 
-        else:
-            print(f"Failed to fetch data. Status Code: {response.status_code}")
+            else:
+                print(f"Failed to fetch data. Status Code: {response.status_code}")
+                break
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        except Exception as e:
+            print(f"An error occurred on page {page}: {e}")
+            break
+
+    print(f"--- SCRAPE COMPLETE ---")
+    print(f"Successfully inserted {total_inserted} total cruises into Supabase!")
 
 if __name__ == "__main__":
     run_scraper()
