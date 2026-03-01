@@ -25,7 +25,6 @@ HEADERS = {
     'referer': 'https://www.onthebeach.co.uk/holidays/cruise/search/search/?traveltype=Cruise+Only&region=Caribbean,Europe',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0',
     'x-requested-with': 'XMLHttpRequest',
-    # Passing your cookie to bypass Datadome temporarily
     'cookie': 'datadome=2_HUpNxC0aFRlZbw7lgs8trJ7wvjP1cJaqZLGnch0R8EaoJ5ONt7GDgnH95URI6Xf4oOIdXHFJhMOYHhvQL69hu7rGCAjGg65sPEqTBklCE0TSDWiSEQs5CLGofSEAqa;'
 }
 
@@ -44,7 +43,6 @@ def run_scraper():
 
         if response.status_code == 200:
             data = response.json()
-            
             cruises = data.get('results', []) 
             
             if not cruises:
@@ -53,23 +51,33 @@ def run_scraper():
 
             print(f"Found {len(cruises)} cruises on Page 1. Preparing for Database insertion...")
             
-            # =========================================================
-            # DIAGNOSTIC: Print the first cruise so we can see the keys!
-            # =========================================================
-            print("\n--- RAW JSON DATA FOR THE FIRST CRUISE ---")
-            print(json.dumps(cruises[0], indent=2))
-            print("------------------------------------------\n")
+            # Optional: Uncomment the line below to wipe the old database records clean before inserting the new daily ones!
+            # supabase.table('OTB Cruises').delete().neq('cruise_line', 'DO_NOT_DELETE').execute()
 
-            # 4. Loop through and Insert
-            for cruise in cruises:
+            # 4. Loop through and Insert using the exact mapped JSON keys
+            for item in cruises:
+                
+                # Extract the nested dictionaries safely
+                c_data = item.get('cruise', {})
+                cl_data = item.get('cruiseline', {})
+                s_data = item.get('ship', {})
+                p_data = item.get('prices_pp', {})
+                
+                # Format the itinerary array into a nice readable string separated by hyphens
+                itinerary_raw = c_data.get('itinerary', [])
+                itinerary_string = " - ".join(itinerary_raw) if isinstance(itinerary_raw, list) else str(itinerary_raw)
+
+                # Format the price safely
+                price_val = p_data.get('cheapest', '0')
+
                 insert_data = {
-                    "cruise_line": str(cruise.get('cruiseLineName', 'Unknown')),
-                    "ship_name": str(cruise.get('shipName', 'Unknown')),
-                    "depart_port": str(cruise.get('departurePort', 'Unknown')),
-                    "itinerary": str(cruise.get('itinerary', 'Unknown')),
-                    "depart_date": str(cruise.get('departureDate', '')),
-                    "duration": str(cruise.get('duration', '')),
-                    "price": str(cruise.get('price', ''))
+                    "cruise_line": str(cl_data.get('name', 'Unknown')),
+                    "ship_name": str(s_data.get('name', 'Unknown')),
+                    "depart_port": str(c_data.get('depart_port', 'Unknown')),
+                    "itinerary": itinerary_string,
+                    "depart_date": str(c_data.get('depart_date', '')),
+                    "duration": str(c_data.get('duration', '')),
+                    "price": str(price_val)
                 }
                 
                 # Push to Supabase
