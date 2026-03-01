@@ -45,34 +45,34 @@ def run_scraper():
         if response.status_code == 200:
             data = response.json()
             
-            # Note: OTB might return the data inside a 'results', 'data', or 'cruises' array.
-            # Adjust 'results' below to match their exact JSON structure.
             cruises = data.get('results', []) 
             
             if not cruises:
-                print("No cruises found or JSON structure is different. Here is a snippet of the raw response:")
-                print(str(data)[:500])
+                print("No cruises found.")
                 return
 
             print(f"Found {len(cruises)} cruises on Page 1. Preparing for Database insertion...")
             
-            # 3. Clean out old data (Updated to 'OTB Cruises')
-            # supabase.table('OTB Cruises').delete().neq('id', 0).execute()
+            # =========================================================
+            # DIAGNOSTIC: Print the first cruise so we can see the keys!
+            # =========================================================
+            print("\n--- RAW JSON DATA FOR THE FIRST CRUISE ---")
+            print(json.dumps(cruises[0], indent=2))
+            print("------------------------------------------\n")
 
             # 4. Loop through and Insert
             for cruise in cruises:
-                # IMPORTANT: Update these .get() keys to match exactly what OTB calls them in their JSON
                 insert_data = {
-                    "cruise_line": cruise.get('cruiseLineName', 'Unknown'),
-                    "ship_name": cruise.get('shipName', 'Unknown'),
-                    "depart_port": cruise.get('departurePort', 'Unknown'),
-                    "itinerary": cruise.get('itinerary', 'Unknown'),
-                    "depart_date": cruise.get('departureDate', ''),
+                    "cruise_line": str(cruise.get('cruiseLineName', 'Unknown')),
+                    "ship_name": str(cruise.get('shipName', 'Unknown')),
+                    "depart_port": str(cruise.get('departurePort', 'Unknown')),
+                    "itinerary": str(cruise.get('itinerary', 'Unknown')),
+                    "depart_date": str(cruise.get('departureDate', '')),
                     "duration": str(cruise.get('duration', '')),
                     "price": str(cruise.get('price', ''))
                 }
                 
-                # Push to Supabase (UPDATED TO 'OTB Cruises' with a space)
+                # Push to Supabase
                 supabase.table('OTB Cruises').insert(insert_data).execute()
                 
             print("Successfully updated Supabase Database!")
