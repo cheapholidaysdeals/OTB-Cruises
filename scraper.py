@@ -28,11 +28,20 @@ HEADERS = {
     'cookie': 'datadome=2_HUpNxC0aFRlZbw7lgs8trJ7wvjP1cJaqZLGnch0R8EaoJ5ONt7GDgnH95URI6Xf4oOIdXHFJhMOYHhvQL69hu7rGCAjGg65sPEqTBklCE0TSDWiSEQs5CLGofSEAqa;'
 }
 
+def clean_text(text):
+    """Removes hidden null bytes and weird characters that crash PostgreSQL"""
+    if not text:
+        return ""
+    return str(text).replace('\x00', '')
+
 def run_scraper():
     print("Starting Global OTB Cruise Crawl...")
     
     # Optional: Wipe the table clean before a fresh daily scrape
-    # supabase.table('OTB Cruises').delete().neq('cruise_line', 'DO_NOT_DELETE').execute()
+    # try:
+    #     supabase.table('OTB Cruises').delete().neq('cruise_line', 'DO_NOT_DELETE').execute()
+    # except Exception as e:
+    #     print(f"Could not clear table: {e}")
     
     page = 1
     total_inserted = 0
@@ -41,7 +50,7 @@ def run_scraper():
     while True:
         print(f"Fetching Page {page}...")
         
-        # The payload dynamically changes the 'page=' number
+        # The payload dynamically changes the 'page=' number to get every cruise
         PAYLOAD = f"action=search%2Fresults&filters=cruiselines%2Cships%2Cregions%2Cdepartports%2Cvisitports%2Cdurations%2Ctraveltypes%2Cprices&page={page}&sort=date&order=asc&startdate=&enddate=&region=&cruiseline=&ship=&departport=&visitport=&duration=&price=1%2C102468&cruises=&traveltype=Cruise+Only"
         
         try:
@@ -72,42 +81,46 @@ def run_scraper():
                     price_val = p_data.get('cheapest', '0')
                     cruise_link = c_data.get('link', '')
                     
-                    # Grab the main ship image
+                    # Grab images safely
                     ship_image_dict = s_data.get('image', {})
                     image_link = ship_image_dict.get('file', '') if isinstance(ship_image_dict, dict) else ''
 
-                    # Grab the Cruise Line Logo
                     cl_image_dict = cl_data.get('image', {})
                     cl_logo_link = cl_image_dict.get('file', '') if isinstance(cl_image_dict, dict) else ''
 
+                    # Scrub all data before inserting
                     insert_data = {
-                        "cruise_line": str(cl_data.get('name', 'Unknown')),
-                        "ship_name": str(s_data.get('name', 'Unknown')),
-                        "depart_port": str(c_data.get('depart_port', 'Unknown')),
-                        "itinerary": itinerary_string,
-                        "depart_date": str(c_data.get('depart_date', '')),
-                        "duration": str(c_data.get('duration', '')),
-                        "price": str(price_val),
-                        "url": str(cruise_link),
-                        "image_url": str(image_link),
-                        "cruise_line_logo": str(cl_logo_link) # --- NEW: Insert Logo into Supabase ---
+                        "cruise_line": clean_text(cl_data.get('name', 'Unknown')),
+                        "ship_name": clean_text(s_data.get('name', 'Unknown')),
+                        "depart_port": clean_text(c_data.get('depart_port', 'Unknown')),
+                        "itinerary": clean_text(itinerary_string),
+                        "depart_date": clean_text(c_data.get('depart_date', '')),
+                        "duration": clean_text(c_data.get('duration', '')),
+                        "price": clean_text(price_val),
+                        "url": clean_text(cruise_link),
+                        "image_url": clean_text(image_link),
+                        "cruise_line_logo": clean_text(cl_logo_link)
                     }
                     
-                    supabase.table('OTB Cruises').insert(insert_data).execute()
-                    total_inserted += 1
+                    # Protected Insertion
+                    try:
+                        supabase.table('OTB Cruises').insert(insert_data).execute()
+                        total_inserted += 1
+                    except Exception as db_err:
+                        print(f"  -> Skipped 1 cruise on page {page} due to DB format error: {db_err}")
                 
                 # Move to the next page
                 page += 1
                 
-                # Sleep for 2 seconds to avoid anti-bot triggers
-                time.sleep(2)
+                # Sleep for 2.5 seconds to act human and keep the server happy
+                time.sleep(2.5)
 
             else:
                 print(f"Failed to fetch data. Status Code: {response.status_code}")
                 break
 
         except Exception as e:
-            print(f"An error occurred on page {page}: {e}")
+            print(f"A network error occurred on page {page}: {e}")
             break
 
     print(f"--- SCRAPE COMPLETE ---")
