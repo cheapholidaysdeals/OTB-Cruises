@@ -1,0 +1,29 @@
+name: Daily OTB Cruise Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at Midnight UTC
+  workflow_dispatch: # Allows you to click a "Run Now" button manually
+
+jobs:
+  scrape-and-update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run Cruise Scraper
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: python scraper.py
